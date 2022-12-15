@@ -101,6 +101,8 @@ class lpca:
         self._k = 2
         #Initialize the number of PCs to retain in each cluster:
         self._nPCs = 2
+        #Initialize variance to preserve
+        self._var = 0.95
         #Set the initialization method:
         self._method = 'uniform'                                             #Available options: 'KMEANS' or 'RANDOM'
         #Set the (eventual) corrector for the rec error computation:
@@ -122,6 +124,9 @@ class lpca:
 
         self._postKNN = False
         self._neighborsNum = 0
+        
+        # Stopping method: var or nPCs
+        self._stop = 'nPCs'   # By default the stopping method is by selecting number of PCs
 
         if dictionary:
             settings = dictionary[0]
@@ -135,17 +140,42 @@ class lpca:
                 print("\tIt will be automatically set equal to: 2.")
                 print("\tYou can ignore this warning if the number of clusters (k) has been assigned later via setter.")
                 print("\tOtherwise, please check the conditions which must be satisfied by the input in the detailed documentation.")
-            
+
             try:
-                self._nPCs = settings["number_of_eigenvectors"]
-                if self._nPCs <= 0 or self._nPCs >= self.X.shape[1]:
+                self._stop = settings["stopping_method"]
+                if self._stop not in ['nPCs', 'var']:
                     raise Exception
             except:
-                self._nPCs = int(self.X.shape[1]/2)
-                warnings.warn("An exception occured with regard to the input value for the number of PCs. It could be not acceptable, or not given to the dictionary.")
-                print("\tIt will be automatically set equal to: X.shape[1]-1.")
-                print("\tYou can ignore this warning if the number of PCs has been assigned later via setter.")
+                self._stop = 'nPCs'
+                warnings.warn("An exception occured with regard to the input value for the stopping method. It could be not acceptable, or not given to the dictionary.")
+                print("\tIt will be automatically set equal to: 'nPCs'.")
+                print("\tYou can ignore this warning if the stopping method has been assigned later via setter.")
                 print("\tOtherwise, please check the conditions which must be satisfied by the input in the detailed documentation.")
+            
+            if self._stop == 'nPCs':
+                try:
+                    self._nPCs = settings["number_of_eigenvectors"]
+                    if self._nPCs <= 0 or self._nPCs >= self.X.shape[1]:
+                        raise Exception
+                except:
+                    self._nPCs = int(self.X.shape[1]/2)
+                    warnings.warn("An exception occured with regard to the input value for the number of PCs. It could be not acceptable, or not given to the dictionary.")
+                    print("\tIt will be automatically set equal to: X.shape[1]-1.")
+                    print("\tYou can ignore this warning if the number of PCs has been assigned later via setter.")
+                    print("\tOtherwise, please check the conditions which must be satisfied by the input in the detailed documentation.")
+    
+            elif self._stop == 'var':
+                try:
+                    self._var = settings["variance_threshold"]
+                    if isinstance(self._var, float) and self._var > 1:
+                        raise Exception
+                except:
+                    self._var = 0.95
+                    warnings.warn("An exception occured with regard to the input value for the variance threshold. It could be not acceptable, or not given to the dictionary.")
+                    print("\tIt will be automatically set equal to: 0.95.")
+                    print("\tYou can ignore this warning if the variance threshold has been assigned later via setter.")
+                    print("\tOtherwise, please check the conditions which must be satisfied by the input in the detailed documentation.")
+
             try:
                 self._center = settings["center"]
                 if not isinstance(self._center, bool):
@@ -729,6 +759,8 @@ class lpca:
             correction_ = np.zeros((rows, self._k), dtype=float)
             scores_factor = np.zeros((rows, self._k), dtype=float)
         # Iterate
+        # Get local eigenvectors and eigenvalues
+        local_eigenvectors = [None] * self._k       # This is now saved as output
         while(iteration < iter_max):
             sq_rec_oss = np.zeros((rows, cols), dtype=float)
             sq_rec_err = np.zeros((rows, self._k), dtype=float)
@@ -751,13 +783,16 @@ class lpca:
                 #perform PCA in the cluster, centering and scaling can be avoided
                 #because the observations are already standardized
                 local_model = model_order_reduction.PCA(cluster)
-                local_model.to_center = False
+                local_model.to_center = True     # Coherent with Parente's code
                 local_model.to_scale = False
-                if not self._adaptive:
+                if self._stop == "nPCs":
                     local_model.eigens = self._nPCs
-                else:
+                elif self._stop == "var":
+                    local_model._threshold_var = self._var
                     local_model.set_PCs()
+                    print("Number of PCs: {}".format(local_model.eigens))
                 modes = local_model.fit()
+                local_eigenvectors[ii] = np.copy(modes[0])
                 #create the centroids (medoids or medianoids, respectively) matrix
                 C_mat = np.matlib.repmat(centroids, rows, 1)
                 #compute the rec error for the considered cluster
@@ -867,7 +902,7 @@ class lpca:
             # Consider only statistical meaningful groups of points: if there are <2 points
             #in a cluster, delete it because it's not statistically meaningful
             idx = self.merge_clusters(self.X_tilde, idx)
-        return idx
+        return idx, local_eigenvectors
 
 
 class fpca(lpca):
