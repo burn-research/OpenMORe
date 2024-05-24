@@ -27,6 +27,9 @@ import numpy.matlib
 import matplotlib
 import matplotlib.pyplot as plt
 
+# Matteo Savarese
+from sklearn.metrics import davies_bouldin_score, silhouette_score
+
 
 class lpca:
     '''
@@ -1654,3 +1657,88 @@ class spectralClustering():
         index = modelK.fit()
 
         return index
+    
+# ---------------------- Matteo Savarese ------------------------ #
+# matteo.savarese@ulb.be
+
+############### Clustering evaluation via Savarese index ##########
+
+def EvaluateCluster(X, idx, q, method="Savarese"):
+    '''
+    Evaluates the quality of a clustering solution based on the specified method. 
+
+    Parameters:
+    X (array-like): The dataset, where each row corresponds to a data point and each column to a feature.
+    idx (array-like): Cluster indices for each data point in X. It indicates which cluster each data point belongs to.
+    q (float, int): If float is the retained variance, if int is the number of retained components
+    method (str, optional): The method used to evaluate the clustering quality. Defaults to "Savarese".
+                            Supported methods include "Savarese", "DB", "silhouette"
+
+    Returns:
+    float: A score representing the quality of the clustering. Higher scores for Savarese index generally indicate lower clustering quality,
+           but the exact interpretation depends on the chosen method.
+
+    Notes:
+    - Ensure that the dataset X and the cluster indices idx are aligned such that each data point in X has a corresponding
+      cluster index in idx.
+    - The function currently supports the "Savarese" method by default. 
+    Example:
+    >>> X = [[1, 2], [2, 3], [3, 4], [8, 9], [9, 10]]
+    >>> idx = [0, 0, 0, 1, 1]
+    >>> q = 0.5
+    >>> score = EvaluateCluster(X, idx, q)
+    >>> print(score)'''
+
+    # import necessary packages
+    from sklearn.decomposition import PCA
+
+    # Get number of clusters
+    k = max(idx)+1
+
+    # Score evaluation
+    if method == 'Savarese':
+
+        # Calculate squared reconstruction error in the clusters
+        rec_err_clust = np.zeros(k)
+        for i in range(k):
+            # Initialize PCA
+            pca = PCA(n_components=q)
+            U_scores = pca.fit_transform(X[idx==i])
+            X_rec = pca.inverse_transform(U_scores)
+            rec_err_clust[i] = (np.mean(np.sum((X[idx==i] - X_rec)**2, axis=1)))
+
+            # Initialize metric
+            metric = 0.0
+            for i in range(k):
+                # Reconstruction error in cluster i
+                eps_i = rec_err_clust[i]
+                # Initialize db
+                db_iter = 0.0
+                for j in range(k):
+                    # Reconstruction error in cluster j
+                    eps_j = rec_err_clust[j]
+                    # Merge cluster i and j
+                    X_ij = np.vstack((X[idx==i,:], X[idx==j,:]))
+                    # Perform PCA in the merged cluster
+                    pca = PCA(n_components=q)
+                    pca.fit(X_ij)
+                    # Reconstruct Xij
+                    U_scores = pca.transform(X_ij)
+                    X_rec    = pca.inverse_transform(U_scores)
+                    # Reconstruction error of merged cluster
+                    eps_ij = np.mean(np.sum((X_ij - X_rec)**2, axis=1))
+                    # Get max between all the clusters pairs
+                    db_iter = max(db_iter, (eps_i + eps_j)/eps_ij)
+
+                metric += db_iter # Sum for the clusters
+            
+            # Average
+            metric = metric / k
+
+    # If DB index was chosen
+    elif method == "DB":
+        metric = davies_bouldin_score(X, idx)
+    elif method == "silhouette":
+        metric = silhouette_score(X, idx)
+
+    return metric
